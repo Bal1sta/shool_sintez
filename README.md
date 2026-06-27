@@ -1,0 +1,1 @@
+# Lab-work-on-the-Digital-Circuit-Synthesis-Chocolate-from-the-Yadro-company
