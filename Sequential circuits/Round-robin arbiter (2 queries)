@@ -1,0 +1,39 @@
+module round_robin_arbiter_with_2_requests
+(
+    input        clk,
+    input        rst,
+    input  [1:0] requests,
+    output logic [1:0] grants
+);
+
+    // Бит приоритета чья сейчас очередь (0 или 1),
+    // если придут оба запроса одновременно.
+    logic priority_bit;
+
+    always_comb begin
+        grants = 2'b00;
+
+        if (requests[0] && requests[1]) begin
+            grants[0] = (priority_bit == 0);
+            grants[1] = (priority_bit == 1);
+        end 
+        else begin
+            grants = requests;
+        end
+    end
+
+    // Обновление приоритета 
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst) begin
+            priority_bit <= 0;
+        end else begin
+            // Если  получил 0-й, следующим приоритет получает 1-й
+            if (grants[0]) 
+                priority_bit <= 1;
+            // Если  получил 1-й, следующим приоритет получает 0-й
+            else if (grants[1]) 
+                priority_bit <= 0;
+        end
+    end
+
+endmodule

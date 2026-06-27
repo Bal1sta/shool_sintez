@@ -1,0 +1,20 @@
+module four_to_one_mux_index
+(
+  input  [3:0] d0, d1, d2, d3,
+  input  [1:0] sel,
+  output [3:0] y
+);
+
+  // Массив из 4 элементов по 4 бита
+  logic [3:0] data [0:3];
+
+  // Заполняем массив входами
+  assign data[0] = d0;
+  assign data[1] = d1;
+  assign data[2] = d2;
+  assign data[3] = d3;
+
+  // sel используется как индекс
+  assign y = data[sel];
+
+endmodule

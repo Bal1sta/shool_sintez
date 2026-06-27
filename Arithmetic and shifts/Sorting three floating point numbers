@@ -1,0 +1,62 @@
+module sort_three_floats (
+    input  logic [2:0][63:0] unsorted,  // packed: 3 элемента по 64 бита
+    output logic [2:0][63:0] sorted,
+    output logic             err
+);
+
+    // Берём входы
+    logic [63:0] a, b, c;
+    assign a = unsorted[0];
+    assign b = unsorted[1];
+    assign c = unsorted[2];
+
+    // finite check: exp != 0x7FF (значит не NaN и не ±Inf)
+    logic a_finite, b_finite, c_finite;
+    assign a_finite = (a[62:52] != 11'h7FF);
+    assign b_finite = (b[62:52] != 11'h7FF);
+    assign c_finite = (c[62:52] != 11'h7FF);
+
+    assign err = !(a_finite && b_finite && c_finite);
+
+    // Ровно 3 FP сравнения
+    logic a_le_b, b_le_c, a_le_c;
+
+    f_less_or_equal cmp_ab (.a(a), .b(b), .res(a_le_b));
+    f_less_or_equal cmp_bc (.a(b), .b(c), .res(b_le_c));
+    f_less_or_equal cmp_ac (.a(a), .b(c), .res(a_le_c));
+
+    // Сортировка (combinational)
+    always_comb begin
+        // дефолт
+        sorted[0] = a;
+        sorted[1] = b;
+        sorted[2] = c;
+
+        if (!err) begin
+            if (a_le_b) begin
+                if (b_le_c) begin
+                    // a ≤ b ≤ c
+                    sorted[0] = a; sorted[1] = b; sorted[2] = c;
+                end else if (a_le_c) begin
+                    // a ≤ c < b
+                    sorted[0] = a; sorted[1] = c; sorted[2] = b;
+                end else begin
+                    // c < a ≤ b
+                    sorted[0] = c; sorted[1] = a; sorted[2] = b;
+                end
+            end else begin
+                if (a_le_c) begin
+                    // b < a ≤ c
+                    sorted[0] = b; sorted[1] = a; sorted[2] = c;
+                end else if (b_le_c) begin
+                    // b ≤ c < a
+                    sorted[0] = b; sorted[1] = c; sorted[2] = a;
+                end else begin
+                    // c < b < a
+                    sorted[0] = c; sorted[1] = b; sorted[2] = a;
+                end
+            end
+        end
+    end
+
+endmodule

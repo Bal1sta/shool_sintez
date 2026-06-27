@@ -1,0 +1,14 @@
+module xor_gate_with_mux
+(
+  input  a, b,
+  output o
+);
+
+  mux m0 (
+    .d0(b),
+    .d1(~b),
+    .sel(a),
+    .y(o)
+  );
+
+endmodule

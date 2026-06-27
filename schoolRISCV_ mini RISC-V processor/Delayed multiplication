@@ -1,0 +1,250 @@
+`ifndef SR_MDU_SV
+`define SR_MDU_SV
+
+`include "sr_cpu.svh"
+
+module sr_mdu
+#(
+    parameter N = 2
+)
+(
+    input              clk,
+    input              rst,
+    input       [31:0] srcA,
+    input       [31:0] srcB,
+    output      [31:0] result
+);
+    logic [31:0] pipeline [N-1:0];
+
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst) begin
+            for (int i = 0; i < N; i++) pipeline[i] <= 32'b0;
+        end else begin
+            pipeline[0] <= srcA * srcB;
+            for (int i = 1; i < N; i++) begin
+                pipeline[i] <= pipeline[i-1];
+            end
+        end
+    end
+
+    assign result = pipeline[N-1];
+endmodule
+
+`endif
+
+
+
+
+
+
+
+
+
+
+
+`ifndef SR_CPU_SVH
+`define SR_CPU_SVH
+
+// ALU commands
+`define ALU_ADD     3'b000
+`define ALU_OR      3'b001
+`define ALU_SRL     3'b010
+`define ALU_SLTU    3'b011
+`define ALU_SUB     3'b100
+
+// Instruction opcode
+`define RVOP_ADDI   7'b0010011
+`define RVOP_BEQ    7'b1100011
+`define RVOP_LUI    7'b0110111
+`define RVOP_BNE    7'b1100011
+`define RVOP_ADD    7'b0110011
+`define RVOP_OR     7'b0110011
+`define RVOP_SRL    7'b0110011
+`define RVOP_SLTU   7'b0110011
+`define RVOP_SUB    7'b0110011
+
+// Instruction funct3
+`define RVF3_ADDI   3'b000
+`define RVF3_BEQ    3'b000
+`define RVF3_BNE    3'b001
+`define RVF3_ADD    3'b000
+`define RVF3_OR     3'b110
+`define RVF3_SRL    3'b101
+`define RVF3_SLTU   3'b011
+`define RVF3_SUB    3'b000
+`define RVF3_ANY    3'b???        // <--- Этого не хватало
+
+// Instruction funct7
+`define RVF7_ADD    7'b0000000
+`define RVF7_OR     7'b0000000
+`define RVF7_SRL    7'b0000000
+`define RVF7_SLTU   7'b0000000
+`define RVF7_SUB    7'b0100000
+`define RVF7_MUL    7'b0000001
+`define RVF7_ANY    7'b???????    // <--- И этого тоже
+
+`endif
+
+
+
+
+
+
+
+
+
+
+
+
+`ifndef SR_CONTROL_SV
+`define SR_CONTROL_SV
+
+`include "sr_cpu.svh"
+
+module sr_control
+(
+    input        [ 6:0] cmdOp,
+    input        [ 2:0] cmdF3,
+    input        [ 6:0] cmdF7,
+    input               aluZero,
+    output logic        pcSrc,
+    output logic        regWrite,
+    output logic        aluSrc,
+    output logic        wdSrc,
+    output logic [ 2:0] aluControl,
+    output logic        mduReq,       
+    output logic        mduResultSrc  
+);
+    logic          branch;
+    logic          condZero;
+    assign pcSrc = branch & (aluZero == condZero);
+
+    always_comb
+    begin
+        branch       = 1'b0;
+        condZero     = 1'b0;
+        regWrite     = 1'b0;
+        aluSrc       = 1'b0;
+        wdSrc        = 1'b0;
+        aluControl   = `ALU_ADD;
+        mduReq       = 1'b0;
+        mduResultSrc = 1'b0;
+
+        casez ({ cmdF7, cmdF3, cmdOp })
+            { `RVF7_ADD,  `RVF3_ADD,  `RVOP_ADD  } : begin regWrite = 1'b1; aluControl = `ALU_ADD;  end
+            { `RVF7_OR,   `RVF3_OR,   `RVOP_OR   } : begin regWrite = 1'b1; aluControl = `ALU_OR;   end
+            { `RVF7_SRL,  `RVF3_SRL,  `RVOP_SRL  } : begin regWrite = 1'b1; aluControl = `ALU_SRL;  end
+            { `RVF7_SLTU, `RVF3_SLTU, `RVOP_SLTU } : begin regWrite = 1'b1; aluControl = `ALU_SLTU; end
+            { `RVF7_SUB,  `RVF3_SUB,  `RVOP_SUB  } : begin regWrite = 1'b1; aluControl = `ALU_SUB;  end
+            
+            // Умножение (использует mduResultSrc для выбора данных из MDU)
+            { `RVF7_MUL,  `RVF3_ADD,  `RVOP_ADD  } : begin 
+                regWrite = 1'b1; 
+                mduReq = 1'b1; 
+                mduResultSrc = 1'b1; 
+            end
+
+            { `RVF7_ANY,  `RVF3_ADDI, `RVOP_ADDI } : begin regWrite = 1'b1; aluSrc = 1'b1; aluControl = `ALU_ADD; end
+            { `RVF7_ANY,  `RVF3_ANY,  `RVOP_LUI  } : begin regWrite = 1'b1; wdSrc  = 1'b1; end
+            { `RVF7_ANY,  `RVF3_BEQ,  `RVOP_BEQ  } : begin branch = 1'b1; condZero = 1'b1; aluControl = `ALU_SUB; end
+            { `RVF7_ANY,  `RVF3_BNE,  `RVOP_BNE  } : begin branch = 1'b1; aluControl = `ALU_SUB; end
+        endcase
+    end
+endmodule
+
+`endif
+
+
+
+
+
+
+
+
+
+`include "sr_cpu.svh"
+
+module sr_cpu
+(
+    input           clk,
+    input           rst,
+    output  [31:0]  imAddr,
+    input   [31:0]  imData,
+    input   [ 4:0]  regAddr,
+    output  [31:0]  regData
+);
+    localparam N = 2; // Латентность умножителя
+
+    // Внутренние сигналы управления
+    wire aluZero, pcSrc, regWrite, aluSrc, wdSrc, mduReq, mduResultSrc;
+    wire [2:0] aluControl;
+
+    // Сигналы инструкции
+    wire [6:0] cmdOp, cmdF7;
+    wire [4:0] rd, rs1, rs2;
+    wire [2:0] cmdF3;
+    wire [31:0] immI, immB, immU;
+
+    // --- Логика STALL ---
+    logic [3:0] wait_cnt;
+    wire stall = mduReq && (wait_cnt != N);
+
+    always_ff @(posedge clk or posedge rst) begin
+        if (rst) wait_cnt <= 4'b0;
+        else if (stall) wait_cnt <= wait_cnt + 4'b1;
+        else wait_cnt <= 4'b0;
+    end
+
+    // Программный счетчик (PC)
+    wire [31:0] pc;
+    wire [31:0] pcBranch = pc + immB;
+    wire [31:0] pcPlus4  = pc + 32'd4;
+    wire [31:0] pcNext   = pcSrc ? pcBranch : pcPlus4;
+
+    register_with_rst_and_en r_pc (
+        .clk(clk), .rst(rst), .en(!stall), .d(pcNext), .q(pc)
+    );
+
+    assign imAddr = pc >> 2;
+    wire [31:0] instr = imData;
+
+    // Дешифратор
+    sr_decode id (
+        .instr(instr), .cmdOp(cmdOp), .rd(rd), .cmdF3(cmdF3),
+        .rs1(rs1), .rs2(rs2), .cmdF7(cmdF7), .immI(immI), .immB(immB), .immU(immU)
+    );
+
+    // Регистровый файл
+    wire [31:0] rd0, rd1, rd2, wd3;
+    sr_register_file i_rf (
+        .clk(clk), .a0(regAddr), .a1(rs1), .a2(rs2), .a3(rd),
+        .rd0(rd0), .rd1(rd1), .rd2(rd2), .wd3(wd3),
+        .we3(regWrite && !stall)
+    );
+
+    // ALU
+    wire [31:0] aluResult;
+    sr_alu alu (
+        .srcA(rd1), .srcB(aluSrc ? immI : rd2), .oper(aluControl), .zero(aluZero), .result(aluResult)
+    );
+
+    // Конвейерный умножитель
+    wire [31:0] mduResult;
+    sr_mdu #(.N(N)) i_mdu (
+        .clk(clk), .rst(rst), .srcA(rd1), .srcB(rd2), .result(mduResult)
+    );
+
+    // Выбор финального результата для записи
+    wire [31:0] wd3_alu_lui = wdSrc ? immU : aluResult;
+    assign wd3 = mduResultSrc ? mduResult : wd3_alu_lui;
+
+    // Контроллер
+    sr_control sm_control (
+        .cmdOp(cmdOp), .cmdF3(cmdF3), .cmdF7(cmdF7), .aluZero(aluZero),
+        .pcSrc(pcSrc), .regWrite(regWrite), .aluSrc(aluSrc), .wdSrc(wdSrc),
+        .aluControl(aluControl), .mduReq(mduReq), .mduResultSrc(mduResultSrc)
+    );
+
+    assign regData = (regAddr != '0) ? rd0 : pc;
+
+endmodule
